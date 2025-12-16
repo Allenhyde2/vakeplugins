@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ActionMerge Pro - 구매 목록 데이터 병합 도구</title>
+    <title>Vake Plugins - 구매 목록 데이터 병합 도구</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -11,7 +11,7 @@
     <!-- SheetJS (XLSX) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
-    <!-- Lucide Icons (Correct UMD Version) -->
+    <!-- Lucide Icons (Correct UMD Version for Browser) -->
     <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
     
     <style>
@@ -21,7 +21,6 @@
             font-family: Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
             background-color: #F9FAFB;
         }
-        /* 애니메이션 제거하여 렌더링 안정성 확보 */
     </style>
 </head>
 <body class="text-gray-900 selection:bg-indigo-100 selection:text-indigo-900 min-h-screen flex flex-col">
@@ -29,12 +28,15 @@
     <!-- Header -->
     <header class="border-b border-gray-200 bg-white sticky top-0 z-10 bg-opacity-80 backdrop-blur-md">
         <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-2">
+            <!-- Link Added Here -->
+            <a href="https://allenhyde2.github.io/vakeplugins/" class="flex items-center space-x-2 hover:opacity-75 transition-opacity duration-200">
+                <!-- Icon Changed to 'V' inside rounded square -->
                 <div class="w-8 h-8 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-lg flex items-center justify-center text-white shadow-md">
-                    <i data-lucide="sparkles" class="w-[18px] h-[18px] text-white/90"></i>
+                    <span class="font-bold text-lg leading-none pt-0.5 font-sans">V</span>
                 </div>
-                <span class="font-bold text-xl tracking-tight text-gray-900">ActionMerge<span class="text-indigo-600">.pro</span></span>
-            </div>
+                <!-- Title -->
+                <span class="font-bold text-xl tracking-tight text-gray-900">Vake Plugins</span>
+            </a>
             <div class="text-xs font-medium px-3 py-1 bg-gray-100 rounded-full text-gray-500">
                 v1.3 Beta
             </div>
@@ -245,7 +247,7 @@
     
     <!-- Footer -->
     <footer class="max-w-4xl mx-auto px-6 py-8 text-center text-gray-400 text-sm">
-        <p>&copy; 2024 ActionMerge Pro. All rights reserved.</p>
+        <p>&copy; 2024 Vake Plugins. All rights reserved.</p>
     </footer>
 
     <script>
