@@ -1,414 +1,495 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, FileSpreadsheet, ArrowRight, Download, CheckCircle, AlertCircle, RefreshCw, Loader2, Sparkles, FileText, X, Info } from 'lucide-react';
-
-const ExcelMerger = () => {
-  const [purchaseFile, setPurchaseFile] = useState(null);
-  const [membersFile, setMembersFile] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processedData, setProcessedData] = useState(null);
-  const [error, setError] = useState('');
-  const [step, setStep] = useState(1);
-  const [isLibraryLoaded, setIsLibraryLoaded] = useState(false);
-
-  // Load XLSX library dynamically
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    script.async = true;
-    script.onload = () => setIsLibraryLoaded(true);
-    script.onerror = () => setError('엑셀 처리 라이브러리를 로드하는데 실패했습니다. 페이지를 새로고침 해주세요.');
-    document.body.appendChild(script);
-
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
-
-  // 파일 업로드 핸들러
-  const handleFileUpload = (e, type) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (type === 'purchase') {
-      setPurchaseFile(file);
-    } else {
-      setMembersFile(file);
-    }
-    setError('');
-  };
-
-  const removeFile = (type) => {
-    if (type === 'purchase') setPurchaseFile(null);
-    else setMembersFile(null);
-    setError('');
-  };
-
-  // 데이터 처리 로직
-  const processFiles = async () => {
-    if (!window.XLSX) {
-      setError('엑셀 라이브러리가 아직 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
-      return;
-    }
-
-    if (!purchaseFile || !membersFile) {
-      setError('두 파일을 모두 업로드해주세요.');
-      return;
-    }
-
-    setIsProcessing(true);
-    setError('');
-
-    try {
-      const readFile = (file) => {
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            try {
-              const data = new Uint8Array(e.target.result);
-              const workbook = window.XLSX.read(data, { type: 'array' });
-              const firstSheetName = workbook.SheetNames[0];
-              const worksheet = workbook.Sheets[firstSheetName];
-              const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-              resolve(jsonData);
-            } catch (err) {
-              reject(err);
-            }
-          };
-          reader.onerror = (err) => reject(err);
-          reader.readAsArrayBuffer(file);
-        });
-      };
-
-      // 1. 데이터 로드
-      const purchaseData = await readFile(purchaseFile);
-      const membersData = await readFile(membersFile);
-
-      if (purchaseData.length === 0 || membersData.length === 0) {
-        throw new Error('파일에 데이터가 없습니다.');
-      }
-
-      // 2. Members 데이터 매핑
-      const memberMap = {};
-      membersData.forEach(row => {
-        const email = row['이메일'] ? String(row['이메일']).trim() : '';
-        const name = row['사용자 이름'];
-        if (email) {
-          memberMap[email] = name;
-        }
-      });
-
-      // 3. Purchase Items 데이터 순회 및 병합
-      const mergedData = purchaseData.map(row => {
-        const email = row['이메일'] ? String(row['이메일']).trim() : '';
-        const matchedName = memberMap[email] || '';
-        
-        const newRow = {};
-        const keys = Object.keys(row);
-        const nameIndex = keys.indexOf('사용자 이름');
-        
-        if (nameIndex !== -1) {
-          keys.forEach((key, index) => {
-            newRow[key] = row[key];
-            if (index === nameIndex) {
-              newRow['하위 모임 사용자 이름'] = matchedName;
-            }
-          });
-        } else {
-          return { ...row, '하위 모임 사용자 이름': matchedName };
-        }
-
-        return newRow;
-      });
-
-      setProcessedData(mergedData);
-      setStep(2);
-    } catch (err) {
-      console.error(err);
-      setError('파일 처리 중 오류가 발생했습니다. 파일 형식을 확인해주세요.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleDownload = () => {
-    if (!processedData || !window.XLSX) return;
-
-    const ws = window.XLSX.utils.json_to_sheet(processedData);
-    const wb = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(wb, ws, "Renewal_Purchase_Items");
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ActionMerge Pro - 구매 목록 데이터 병합 도구</title>
     
-    const date = new Date().toISOString().slice(0, 10);
-    window.XLSX.writeFile(wb, `purchase_items_renewed_${date}.xlsx`);
-  };
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SheetJS (XLSX) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Lucide Icons (Correct UMD Version) -->
+    <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+    
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        
+        body {
+            font-family: Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+            background-color: #F9FAFB;
+        }
+        /* 애니메이션 제거하여 렌더링 안정성 확보 */
+    </style>
+</head>
+<body class="text-gray-900 selection:bg-indigo-100 selection:text-indigo-900 min-h-screen flex flex-col">
 
-  const resetProcess = () => {
-    setPurchaseFile(null);
-    setMembersFile(null);
-    setProcessedData(null);
-    setStep(1);
-    setError('');
-  };
-
-  if (!isLibraryLoaded) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-400">
-        <Loader2 className="animate-spin mb-4" size={32} />
-        <p className="text-sm font-medium">Loading resources...</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-[#F9FAFB] text-gray-900 font-sans selection:bg-indigo-100 selection:text-indigo-900">
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white sticky top-0 z-10 bg-opacity-80 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-lg flex items-center justify-center text-white shadow-md">
-              <Sparkles size={18} fill="currentColor" className="text-white/90" />
+    <!-- Header -->
+    <header class="border-b border-gray-200 bg-white sticky top-0 z-10 bg-opacity-80 backdrop-blur-md">
+        <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <div class="w-8 h-8 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-lg flex items-center justify-center text-white shadow-md">
+                    <i data-lucide="sparkles" class="w-[18px] h-[18px] text-white/90"></i>
+                </div>
+                <span class="font-bold text-xl tracking-tight text-gray-900">ActionMerge<span class="text-indigo-600">.pro</span></span>
             </div>
-            <span className="font-bold text-xl tracking-tight text-gray-900">ActionMerge<span className="text-indigo-600">.pro</span></span>
-          </div>
-          <div className="text-xs font-medium px-3 py-1 bg-gray-100 rounded-full text-gray-500">
-            v1.3 Beta
-          </div>
+            <div class="text-xs font-medium px-3 py-1 bg-gray-100 rounded-full text-gray-500">
+                v1.3 Beta
+            </div>
         </div>
-      </header>
+    </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-12">
-        <div className="mb-12 text-center max-w-2xl mx-auto">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4 tracking-tight leading-tight">
-            구매 목록에<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600">액션 사용자 정보를 추가하세요.</span>
-          </h1>
-          <p className="text-lg text-gray-500 leading-relaxed">
-            Purchase Items 파일과 Members 파일을 대조하여,<br className="hidden sm:block"/>
-            '하위 모임 사용자 이름'을 자동으로 매칭해 드립니다.
-          </p>
+    <!-- Main Content -->
+    <main class="max-w-4xl mx-auto px-6 py-12 flex-grow w-full">
+        
+        <!-- Intro Section -->
+        <div id="intro-section" class="mb-12 text-center max-w-2xl mx-auto">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-4 tracking-tight leading-tight">
+                구매 목록에<br />
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600">액션 사용자 정보를 추가하세요.</span>
+            </h1>
+            <p class="text-lg text-gray-500 leading-relaxed">
+                Purchase Items 파일과 Members 파일을 대조하여,<br class="hidden sm:block"/>
+                '하위 모임 사용자 이름'을 자동으로 매칭해 드립니다.
+            </p>
         </div>
 
-        {step === 1 && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Main Action Card */}
-            <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden transition-all duration-300">
-              <div className="p-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-10"></div>
-              <div className="p-8 md:p-10">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
-                  {/* Purchase File Card */}
-                  <div className={`group relative rounded-xl transition-all duration-300 ${purchaseFile ? 'bg-indigo-50/50 border-indigo-200' : 'bg-gray-50 border-gray-200 hover:border-indigo-300 hover:shadow-md' } border-2 border-dashed`}>
-                    <input 
-                      type="file" 
-                      id="purchase-upload"
-                      accept=".xlsx, .xls, .csv" 
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                      onChange={(e) => handleFileUpload(e, 'purchase')}
-                    />
-                    <div className="p-8 flex flex-col items-center justify-center text-center h-full min-h-[240px]">
-                      {purchaseFile ? (
-                        <div className="relative z-20 w-full">
-                          <div className="w-16 h-16 mx-auto bg-white rounded-full shadow-md flex items-center justify-center mb-4 text-indigo-600">
-                            <CheckCircle size={32} />
-                          </div>
-                          <h3 className="font-bold text-gray-900 mb-1 truncate px-4">{purchaseFile.name}</h3>
-                          <p className="text-xs text-indigo-600 font-medium bg-indigo-100 inline-block px-2 py-1 rounded mb-4">준비 완료</p>
-                          <button 
-                            onClick={(e) => { e.preventDefault(); removeFile('purchase'); }}
-                            className="text-xs text-gray-400 hover:text-red-500 flex items-center justify-center mx-auto transition-colors"
-                          >
-                            <X size={12} className="mr-1" /> 파일 제거
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="w-16 h-16 bg-white rounded-full shadow-sm flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-300 text-gray-400 group-hover:text-indigo-500">
-                            <FileSpreadsheet size={32} strokeWidth={1.5} />
-                          </div>
-                          <h3 className="font-bold text-gray-800 mb-2">Purchase Items</h3>
-                          <p className="text-sm text-gray-500 px-4 leading-relaxed">
-                            <span className="font-semibold text-indigo-600">파일 선택</span> 또는 드래그<br/>
-                            <span className="text-xs text-gray-400 mt-1 block">.xlsx, .xls, .csv 지원</span>
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  </div>
+        <!-- Step 1: Upload Section -->
+        <div id="step-1" class="space-y-8">
+            
+            <!-- Upload Card -->
+            <div class="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden transition-all duration-300">
+                <div class="p-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-10"></div>
+                <div class="p-8 md:p-10">
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
+                        
+                        <!-- Purchase File Input -->
+                        <div id="card-purchase" class="group relative rounded-xl transition-all duration-300 bg-gray-50 border-2 border-dashed border-gray-200 hover:border-indigo-300 hover:shadow-md">
+                            <input type="file" id="input-purchase" accept=".xlsx, .xls, .csv" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                            
+                            <!-- Empty State -->
+                            <div id="content-purchase-empty" class="p-8 flex flex-col items-center justify-center text-center h-full min-h-[240px]">
+                                <div class="w-16 h-16 bg-white rounded-full shadow-sm flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-300 text-gray-400 group-hover:text-indigo-500">
+                                    <i data-lucide="file-spreadsheet" class="w-8 h-8" stroke-width="1.5"></i>
+                                </div>
+                                <h3 class="font-bold text-gray-800 mb-2">Purchase Items</h3>
+                                <p class="text-sm text-gray-500 px-4 leading-relaxed">
+                                    <span class="font-semibold text-indigo-600">파일 선택</span> 또는 드래그<br/>
+                                    <span class="text-xs text-gray-400 mt-1 block">.xlsx, .xls, .csv 지원</span>
+                                </p>
+                            </div>
 
-                  {/* Members File Card */}
-                  <div className={`group relative rounded-xl transition-all duration-300 ${membersFile ? 'bg-indigo-50/50 border-indigo-200' : 'bg-gray-50 border-gray-200 hover:border-indigo-300 hover:shadow-md' } border-2 border-dashed`}>
-                    <input 
-                      type="file" 
-                      id="members-upload"
-                      accept=".xlsx, .xls, .csv" 
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                      onChange={(e) => handleFileUpload(e, 'members')}
-                    />
-                    <div className="p-8 flex flex-col items-center justify-center text-center h-full min-h-[240px]">
-                      {membersFile ? (
-                        <div className="relative z-20 w-full">
-                          <div className="w-16 h-16 mx-auto bg-white rounded-full shadow-md flex items-center justify-center mb-4 text-indigo-600">
-                            <CheckCircle size={32} />
-                          </div>
-                          <h3 className="font-bold text-gray-900 mb-1 truncate px-4">{membersFile.name}</h3>
-                          <p className="text-xs text-indigo-600 font-medium bg-indigo-100 inline-block px-2 py-1 rounded mb-4">준비 완료</p>
-                          <button 
-                            onClick={(e) => { e.preventDefault(); removeFile('members'); }}
-                            className="text-xs text-gray-400 hover:text-red-500 flex items-center justify-center mx-auto transition-colors"
-                          >
-                            <X size={12} className="mr-1" /> 파일 제거
-                          </button>
+                            <!-- Filled State (Hidden by default) -->
+                            <div id="content-purchase-filled" class="hidden p-8 flex flex-col items-center justify-center text-center h-full min-h-[240px]">
+                                <div class="relative z-20 w-full">
+                                    <div class="w-16 h-16 mx-auto bg-white rounded-full shadow-md flex items-center justify-center mb-4 text-indigo-600">
+                                        <i data-lucide="check-circle" class="w-8 h-8"></i>
+                                    </div>
+                                    <h3 id="filename-purchase" class="font-bold text-gray-900 mb-1 truncate px-4">filename.xlsx</h3>
+                                    <p class="text-xs text-indigo-600 font-medium bg-indigo-100 inline-block px-2 py-1 rounded mb-4">준비 완료</p>
+                                    <button id="btn-remove-purchase" class="text-xs text-gray-400 hover:text-red-500 flex items-center justify-center mx-auto transition-colors z-30 relative">
+                                        <i data-lucide="x" class="w-3 h-3 mr-1"></i> 파일 제거
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                      ) : (
-                        <>
-                          <div className="w-16 h-16 bg-white rounded-full shadow-sm flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-300 text-gray-400 group-hover:text-indigo-500">
-                            <FileText size={32} strokeWidth={1.5} />
-                          </div>
-                          <h3 className="font-bold text-gray-800 mb-2">Members List</h3>
-                          <p className="text-sm text-gray-500 px-4 leading-relaxed">
-                             <span className="font-semibold text-indigo-600">파일 선택</span> 또는 드래그<br/>
-                             <span className="text-xs text-gray-400 mt-1 block">.xlsx, .xls, .csv 지원</span>
-                          </p>
-                        </>
-                      )}
+
+                        <!-- Members File Input -->
+                        <div id="card-members" class="group relative rounded-xl transition-all duration-300 bg-gray-50 border-2 border-dashed border-gray-200 hover:border-indigo-300 hover:shadow-md">
+                            <input type="file" id="input-members" accept=".xlsx, .xls, .csv" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                            
+                            <!-- Empty State -->
+                            <div id="content-members-empty" class="p-8 flex flex-col items-center justify-center text-center h-full min-h-[240px]">
+                                <div class="w-16 h-16 bg-white rounded-full shadow-sm flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-300 text-gray-400 group-hover:text-indigo-500">
+                                    <i data-lucide="file-text" class="w-8 h-8" stroke-width="1.5"></i>
+                                </div>
+                                <h3 class="font-bold text-gray-800 mb-2">Members List</h3>
+                                <p class="text-sm text-gray-500 px-4 leading-relaxed">
+                                    <span class="font-semibold text-indigo-600">파일 선택</span> 또는 드래그<br/>
+                                    <span class="text-xs text-gray-400 mt-1 block">.xlsx, .xls, .csv 지원</span>
+                                </p>
+                            </div>
+
+                            <!-- Filled State (Hidden by default) -->
+                            <div id="content-members-filled" class="hidden p-8 flex flex-col items-center justify-center text-center h-full min-h-[240px]">
+                                <div class="relative z-20 w-full">
+                                    <div class="w-16 h-16 mx-auto bg-white rounded-full shadow-md flex items-center justify-center mb-4 text-indigo-600">
+                                        <i data-lucide="check-circle" class="w-8 h-8"></i>
+                                    </div>
+                                    <h3 id="filename-members" class="font-bold text-gray-900 mb-1 truncate px-4">filename.xlsx</h3>
+                                    <p class="text-xs text-indigo-600 font-medium bg-indigo-100 inline-block px-2 py-1 rounded mb-4">준비 완료</p>
+                                    <button id="btn-remove-members" class="text-xs text-gray-400 hover:text-red-500 flex items-center justify-center mx-auto transition-colors z-30 relative">
+                                        <i data-lucide="x" class="w-3 h-3 mr-1"></i> 파일 제거
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
-                  </div>
+
+                    <!-- Error Message -->
+                    <div id="error-message" class="hidden mb-6 p-4 bg-red-50 border border-red-100 rounded-xl flex items-start">
+                        <i data-lucide="alert-circle" class="text-red-500 mt-0.5 mr-3 flex-shrink-0 w-[18px] h-[18px]"></i>
+                        <p id="error-text" class="text-sm text-red-600 font-medium">Error Message</p>
+                    </div>
+
+                    <!-- Process Button -->
+                    <button id="btn-process" disabled class="w-full py-4 rounded-xl flex items-center justify-center text-base font-bold transition-all duration-300 shadow-none bg-gray-200 text-gray-400 cursor-not-allowed">
+                        <i data-lucide="sparkles" class="mr-2 w-[18px] h-[18px]"></i>
+                        <span>데이터 병합 시작하기</span>
+                    </button>
+                    
+                    <!-- Loading Spinner (Hidden inside button usually, but simplified here) -->
+                    <button id="btn-loading" class="hidden w-full py-4 rounded-xl flex items-center justify-center text-base font-bold bg-[#111827] text-white cursor-wait">
+                        <i data-lucide="loader-2" class="animate-spin mr-2 w-5 h-5"></i>
+                        데이터 분석 및 처리 중...
+                    </button>
+                </div>
+            </div>
+
+            <!-- Usage Guide -->
+            <div class="bg-white rounded-xl shadow-lg border border-gray-100 p-8">
+                <h3 class="font-bold text-gray-900 mb-6 flex items-center text-lg">
+                    <i data-lucide="info" class="text-indigo-600 mr-2 w-6 h-6"></i>
+                    데이터 병합 가이드
+                </h3>
+                <ol class="space-y-8">
+                    <li class="flex items-start">
+                        <div class="flex-shrink-0 w-10 h-10 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 mr-5 shadow-sm">1</div>
+                        <div class="pt-1 w-full">
+                            <h4 class="font-bold text-gray-900 text-base mb-2">구매 데이터 확보 (Purchase Items)</h4>
+                            <p class="text-sm text-gray-600 leading-relaxed mb-2">
+                                허브모임 관리자 페이지의 <span class="font-semibold text-gray-800">주문 통합 검색</span> 메뉴에서 조건을 설정하여 엑셀 파일을 다운로드합니다.
+                            </p>
+                            <div class="flex items-center text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100 w-fit">
+                                <i data-lucide="file-spreadsheet" class="mr-1.5 text-green-600 w-3.5 h-3.5"></i>
+                                <span>파일명 예시: <code class="font-mono text-gray-700 font-medium">purchase_items.xlsx</code></span>
+                                <i data-lucide="arrow-right" class="mx-2 text-gray-400 w-3 h-3"></i>
+                                <span class="text-indigo-600 font-medium">Purchase Items 영역에 업로드</span>
+                            </div>
+                        </div>
+                    </li>
+
+                    <li class="flex items-start">
+                        <div class="flex-shrink-0 w-10 h-10 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 mr-5 shadow-sm">2</div>
+                        <div class="pt-1 w-full">
+                            <h4 class="font-bold text-gray-900 text-base mb-2">회원 데이터 확보 (Members List)</h4>
+                            <p class="text-sm text-gray-600 leading-relaxed mb-2">
+                                대상 액션의 관리자 페이지로 이동하여 <span class="font-semibold text-gray-800">회원 관리 &gt; 활동 회원</span> 메뉴에서 회원 명단을 다운로드합니다.
+                            </p>
+                            <div class="flex items-center text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100 w-fit">
+                                <i data-lucide="file-text" class="mr-1.5 text-blue-600 w-3.5 h-3.5"></i>
+                                <span>파일명 예시: <code class="font-mono text-gray-700 font-medium">members.xlsx</code></span>
+                                <i data-lucide="arrow-right" class="mx-2 text-gray-400 w-3 h-3"></i>
+                                <span class="text-indigo-600 font-medium">Members List 영역에 업로드</span>
+                            </div>
+                        </div>
+                    </li>
+
+                    <li class="flex items-start">
+                        <div class="flex-shrink-0 w-10 h-10 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 mr-5 shadow-sm">3</div>
+                        <div class="pt-1 w-full">
+                            <h4 class="font-bold text-gray-900 text-base mb-2">병합 및 결과물 생성</h4>
+                            <p class="text-sm text-gray-600 leading-relaxed mb-2">
+                                두 파일이 모두 준비되면 상단의 <span class="font-semibold text-indigo-600">데이터 병합 시작하기</span> 버튼을 클릭합니다.
+                                작업이 완료되면 결과 파일을 다운로드하여 <span class="font-semibold text-gray-800">하위 모임 사용자 이름</span>이 포함된 데이터를 확인하실 수 있습니다.
+                            </p>
+                        </div>
+                    </li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Step 2: Result Section (Hidden by default) -->
+        <div id="step-2" class="hidden bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden">
+            <div class="p-1 bg-gradient-to-r from-green-400 to-emerald-500"></div>
+            <div class="p-10 text-center">
+                <div class="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <i data-lucide="check-circle" class="text-green-500 w-10 h-10"></i>
+                </div>
+                <h2 class="text-3xl font-bold text-gray-900 mb-2">작업 완료!</h2>
+                <p class="text-gray-500 mb-8 max-w-md mx-auto">
+                    <span id="result-count" class="font-bold text-gray-900">0</span>개의 데이터가 성공적으로 병합되었습니다.<br/>
+                    이제 파일을 다운로드하여 구글 스프레드시트에서 활용해보세요.
+                </p>
+
+                <div class="flex flex-col sm:flex-row justify-center gap-4 mb-10">
+                    <button id="btn-download" class="px-8 py-4 bg-[#111827] hover:bg-black text-white rounded-xl font-bold flex items-center justify-center shadow-lg transition-all hover:-translate-y-0.5">
+                        <i data-lucide="download" class="mr-2 w-5 h-5"></i>
+                        결과 파일 다운로드
+                    </button>
+                    <button id="btn-reset" class="px-8 py-4 bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 rounded-xl font-bold transition-all">
+                        새로운 작업하기
+                    </button>
                 </div>
 
-                {error && (
-                  <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl flex items-start animate-in fade-in slide-in-from-top-2">
-                    <AlertCircle className="text-red-500 mt-0.5 mr-3 flex-shrink-0" size={18} />
-                    <p className="text-sm text-red-600 font-medium">{error}</p>
-                  </div>
-                )}
-
-                <button
-                  onClick={processFiles}
-                  disabled={isProcessing || !purchaseFile || !membersFile}
-                  className={`w-full py-4 rounded-xl flex items-center justify-center text-base font-bold transition-all duration-300 shadow-lg hover:shadow-xl hover:-translate-y-0.5
-                    ${(isProcessing || !purchaseFile || !membersFile) 
-                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none hover:translate-y-0' 
-                      : 'bg-[#111827] text-white hover:bg-black'}`}
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="animate-spin mr-2" size={20} />
-                      데이터 분석 및 처리 중...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="mr-2 text-indigo-300" size={18} />
-                      데이터 병합 시작하기
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Usage Guide Card - Professional Layout */}
-            <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-8">
-              <h3 className="font-bold text-gray-900 mb-6 flex items-center text-lg">
-                <Info className="text-indigo-600 mr-2" size={24} />
-                데이터 병합 가이드
-              </h3>
-              <ol className="space-y-8">
-                <li className="flex items-start">
-                  <div className="flex-shrink-0 w-10 h-10 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 mr-5 shadow-sm">1</div>
-                  <div className="pt-1 w-full">
-                    <h4 className="font-bold text-gray-900 text-base mb-2">구매 데이터 확보 (Purchase Items)</h4>
-                    <p className="text-sm text-gray-600 leading-relaxed mb-2">
-                      허브모임 관리자 페이지의 <span className="font-semibold text-gray-800">주문 통합 검색</span> 메뉴에서 조건을 설정하여 엑셀 파일을 다운로드합니다.
-                    </p>
-                    <div className="flex items-center text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100 w-fit">
-                      <FileSpreadsheet size={14} className="mr-1.5 text-green-600"/>
-                      <span>파일명 예시: <code className="font-mono text-gray-700 font-medium">purchase_items.xlsx</code></span>
-                      <ArrowRight size={12} className="mx-2 text-gray-400"/>
-                      <span className="text-indigo-600 font-medium">Purchase Items 영역에 업로드</span>
+                <div class="bg-gray-50 rounded-xl p-6 text-left border border-gray-100">
+                    <h4 class="font-bold text-gray-900 mb-3 flex items-center text-sm">
+                        <span class="w-6 h-6 rounded bg-indigo-100 text-indigo-600 flex items-center justify-center mr-2 text-xs">TIP</span>
+                        Google Sheets 연동 가이드
+                    </h4>
+                    <div class="text-sm text-gray-600 space-y-2 pl-8 relative">
+                        <div class="absolute left-3 top-2 bottom-2 w-0.5 bg-gray-200"></div>
+                        <p>1. 다운로드 받은 <b>.xlsx</b> 파일을 준비합니다.</p>
+                        <p>2. <a href="https://sheets.google.com" target="_blank" rel="noreferrer" class="text-indigo-600 hover:underline font-medium">Google Sheets</a>에서 <b>파일 &gt; 가져오기</b>를 선택합니다.</p>
+                        <p>3. 파일을 업로드하면 데이터가 시트에 자동으로 채워집니다.</p>
                     </div>
-                  </div>
-                </li>
-
-                <li className="flex items-start">
-                  <div className="flex-shrink-0 w-10 h-10 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 mr-5 shadow-sm">2</div>
-                  <div className="pt-1 w-full">
-                    <h4 className="font-bold text-gray-900 text-base mb-2">회원 데이터 확보 (Members List)</h4>
-                    <p className="text-sm text-gray-600 leading-relaxed mb-2">
-                      대상 액션의 관리자 페이지로 이동하여 <span className="font-semibold text-gray-800">회원 관리 &gt; 활동 회원</span> 메뉴에서 회원 명단을 다운로드합니다.
-                    </p>
-                    <div className="flex items-center text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100 w-fit">
-                      <FileText size={14} className="mr-1.5 text-blue-600"/>
-                      <span>파일명 예시: <code className="font-mono text-gray-700 font-medium">members.xlsx</code></span>
-                      <ArrowRight size={12} className="mx-2 text-gray-400"/>
-                      <span className="text-indigo-600 font-medium">Members List 영역에 업로드</span>
-                    </div>
-                  </div>
-                </li>
-
-                <li className="flex items-start">
-                  <div className="flex-shrink-0 w-10 h-10 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 mr-5 shadow-sm">3</div>
-                  <div className="pt-1 w-full">
-                    <h4 className="font-bold text-gray-900 text-base mb-2">병합 및 결과물 생성</h4>
-                    <p className="text-sm text-gray-600 leading-relaxed mb-2">
-                      두 파일이 모두 준비되면 상단의 <span className="font-semibold text-indigo-600">데이터 병합 시작하기</span> 버튼을 클릭합니다.
-                      작업이 완료되면 결과 파일을 다운로드하여 <span className="font-semibold text-gray-800">하위 모임 사용자 이름</span>이 포함된 데이터를 확인하실 수 있습니다.
-                    </p>
-                  </div>
-                </li>
-              </ol>
-            </div>
-          </div>
-        )}
-
-        {step === 2 && processedData && (
-          <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-             <div className="p-1 bg-gradient-to-r from-green-400 to-emerald-500"></div>
-            <div className="p-10 text-center">
-              <div className="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                <CheckCircle className="text-green-500" size={40} />
-              </div>
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">작업 완료!</h2>
-              <p className="text-gray-500 mb-8 max-w-md mx-auto">
-                <span className="font-bold text-gray-900">{processedData.length}</span>개의 데이터가 성공적으로 병합되었습니다.<br/>
-                이제 파일을 다운로드하여 구글 스프레드시트에서 활용해보세요.
-              </p>
-
-              <div className="flex flex-col sm:flex-row justify-center gap-4 mb-10">
-                <button
-                  onClick={handleDownload}
-                  className="px-8 py-4 bg-[#111827] hover:bg-black text-white rounded-xl font-bold flex items-center justify-center shadow-lg transition-all hover:-translate-y-0.5"
-                >
-                  <Download className="mr-2" size={20} />
-                  결과 파일 다운로드
-                </button>
-                <button
-                  onClick={resetProcess}
-                  className="px-8 py-4 bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 rounded-xl font-bold transition-all"
-                >
-                  새로운 작업하기
-                </button>
-              </div>
-
-              <div className="bg-gray-50 rounded-xl p-6 text-left border border-gray-100">
-                <h4 className="font-bold text-gray-900 mb-3 flex items-center text-sm">
-                  <span className="w-6 h-6 rounded bg-indigo-100 text-indigo-600 flex items-center justify-center mr-2 text-xs">TIP</span>
-                  Google Sheets 연동 가이드
-                </h4>
-                <div className="text-sm text-gray-600 space-y-2 pl-8 relative">
-                   <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-gray-200"></div>
-                  <p>1. 다운로드 받은 <b>.xlsx</b> 파일을 준비합니다.</p>
-                  <p>2. <a href="https://sheets.google.com" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline font-medium">Google Sheets</a>에서 <b>파일 &gt; 가져오기</b>를 선택합니다.</p>
-                  <p>3. 파일을 업로드하면 데이터가 시트에 자동으로 채워집니다.</p>
                 </div>
-              </div>
             </div>
-          </div>
-        )}
-      </main>
-      
-      {/* Footer */}
-      <footer className="max-w-4xl mx-auto px-6 py-8 text-center text-gray-400 text-sm">
+        </div>
+
+    </main>
+    
+    <!-- Footer -->
+    <footer class="max-w-4xl mx-auto px-6 py-8 text-center text-gray-400 text-sm">
         <p>&copy; 2024 ActionMerge Pro. All rights reserved.</p>
-      </footer>
-    </div>
-  );
-};
+    </footer>
 
-export default ExcelMerger;
+    <script>
+        // State
+        let purchaseFile = null;
+        let membersFile = null;
+        let processedData = null;
+
+        // Elements
+        const step1 = document.getElementById('step-1');
+        const step2 = document.getElementById('step-2');
+        const introSection = document.getElementById('intro-section');
+        
+        const inputPurchase = document.getElementById('input-purchase');
+        const inputMembers = document.getElementById('input-members');
+        
+        const cardPurchase = document.getElementById('card-purchase');
+        const cardMembers = document.getElementById('card-members');
+        
+        const contentPurchaseEmpty = document.getElementById('content-purchase-empty');
+        const contentPurchaseFilled = document.getElementById('content-purchase-filled');
+        const filenamePurchase = document.getElementById('filename-purchase');
+        const btnRemovePurchase = document.getElementById('btn-remove-purchase');
+
+        const contentMembersEmpty = document.getElementById('content-members-empty');
+        const contentMembersFilled = document.getElementById('content-members-filled');
+        const filenameMembers = document.getElementById('filename-members');
+        const btnRemoveMembers = document.getElementById('btn-remove-members');
+
+        const btnProcess = document.getElementById('btn-process');
+        const btnLoading = document.getElementById('btn-loading');
+        
+        const errorMessage = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+
+        const resultCount = document.getElementById('result-count');
+        const btnDownload = document.getElementById('btn-download');
+        const btnReset = document.getElementById('btn-reset');
+
+        // Helper: Update Button State
+        function updateProcessButton() {
+            if (purchaseFile && membersFile) {
+                btnProcess.disabled = false;
+                btnProcess.classList.remove('bg-gray-200', 'text-gray-400', 'cursor-not-allowed', 'shadow-none');
+                btnProcess.classList.add('bg-[#111827]', 'text-white', 'hover:bg-black', 'shadow-lg', 'hover:shadow-xl', 'hover:-translate-y-0.5');
+                // Icon styling inside button update is handled by CSS classes mainly
+            } else {
+                btnProcess.disabled = true;
+                btnProcess.classList.add('bg-gray-200', 'text-gray-400', 'cursor-not-allowed', 'shadow-none');
+                btnProcess.classList.remove('bg-[#111827]', 'text-white', 'hover:bg-black', 'shadow-lg', 'hover:shadow-xl', 'hover:-translate-y-0.5');
+            }
+        }
+
+        // Helper: Handle File Selection
+        function handleFileSelect(file, type) {
+            if (!file) return;
+
+            if (type === 'purchase') {
+                purchaseFile = file;
+                cardPurchase.classList.add('bg-indigo-50/50', 'border-indigo-200');
+                cardPurchase.classList.remove('bg-gray-50', 'border-gray-200');
+                contentPurchaseEmpty.classList.add('hidden');
+                contentPurchaseFilled.classList.remove('hidden');
+                filenamePurchase.textContent = file.name;
+            } else {
+                membersFile = file;
+                cardMembers.classList.add('bg-indigo-50/50', 'border-indigo-200');
+                cardMembers.classList.remove('bg-gray-50', 'border-gray-200');
+                contentMembersEmpty.classList.add('hidden');
+                contentMembersFilled.classList.remove('hidden');
+                filenameMembers.textContent = file.name;
+            }
+            
+            errorMessage.classList.add('hidden');
+            updateProcessButton();
+        }
+
+        // Helper: Remove File
+        function removeFile(type) {
+            if (type === 'purchase') {
+                purchaseFile = null;
+                inputPurchase.value = '';
+                cardPurchase.classList.remove('bg-indigo-50/50', 'border-indigo-200');
+                cardPurchase.classList.add('bg-gray-50', 'border-gray-200');
+                contentPurchaseEmpty.classList.remove('hidden');
+                contentPurchaseFilled.classList.add('hidden');
+            } else {
+                membersFile = null;
+                inputMembers.value = '';
+                cardMembers.classList.remove('bg-indigo-50/50', 'border-indigo-200');
+                cardMembers.classList.add('bg-gray-50', 'border-gray-200');
+                contentMembersEmpty.classList.remove('hidden');
+                contentMembersFilled.classList.add('hidden');
+            }
+            updateProcessButton();
+        }
+
+        // Event Listeners: Input Changes
+        inputPurchase.addEventListener('change', (e) => handleFileSelect(e.target.files[0], 'purchase'));
+        inputMembers.addEventListener('change', (e) => handleFileSelect(e.target.files[0], 'members'));
+
+        // Event Listeners: Remove Buttons
+        btnRemovePurchase.addEventListener('click', (e) => {
+            e.preventDefault();
+            removeFile('purchase');
+        });
+        btnRemoveMembers.addEventListener('click', (e) => {
+            e.preventDefault();
+            removeFile('members');
+        });
+
+        // Event Listener: Process Button
+        btnProcess.addEventListener('click', async () => {
+            if (!purchaseFile || !membersFile) {
+                errorText.textContent = '두 파일을 모두 업로드해주세요.';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            if (typeof XLSX === 'undefined') {
+                errorText.textContent = '엑셀 처리 라이브러리를 로드하지 못했습니다. 페이지를 새로고침해주세요.';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            // UI Loading State
+            btnProcess.classList.add('hidden');
+            btnLoading.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+
+            try {
+                // File Reader Helper
+                const readFile = (file) => {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            try {
+                                const data = new Uint8Array(e.target.result);
+                                const workbook = XLSX.read(data, { type: 'array' });
+                                const firstSheetName = workbook.SheetNames[0];
+                                const worksheet = workbook.Sheets[firstSheetName];
+                                const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+                                resolve(jsonData);
+                            } catch (err) {
+                                reject(err);
+                            }
+                        };
+                        reader.onerror = (err) => reject(err);
+                        reader.readAsArrayBuffer(file);
+                    });
+                };
+
+                const purchaseData = await readFile(purchaseFile);
+                const membersData = await readFile(membersFile);
+
+                if (purchaseData.length === 0 || membersData.length === 0) {
+                    throw new Error('파일에 데이터가 없습니다.');
+                }
+
+                // Logic: Map Members Email -> Name
+                const memberMap = {};
+                membersData.forEach(row => {
+                    const email = row['이메일'] ? String(row['이메일']).trim() : '';
+                    const name = row['사용자 이름'];
+                    if (email) {
+                        memberMap[email] = name;
+                    }
+                });
+
+                // Logic: Merge Data
+                processedData = purchaseData.map(row => {
+                    const email = row['이메일'] ? String(row['이메일']).trim() : '';
+                    const matchedName = memberMap[email] || '';
+                    
+                    const newRow = {};
+                    const keys = Object.keys(row);
+                    const nameIndex = keys.indexOf('사용자 이름');
+                    
+                    if (nameIndex !== -1) {
+                        keys.forEach((key, index) => {
+                            newRow[key] = row[key];
+                            if (index === nameIndex) {
+                                newRow['하위 모임 사용자 이름'] = matchedName;
+                            }
+                        });
+                    } else {
+                        // If '사용자 이름' column doesn't exist, append at end
+                        Object.assign(newRow, row);
+                        newRow['하위 모임 사용자 이름'] = matchedName;
+                    }
+
+                    return newRow;
+                });
+
+                // Success State
+                resultCount.textContent = processedData.length;
+                step1.classList.add('hidden');
+                introSection.classList.add('hidden');
+                step2.classList.remove('hidden');
+
+            } catch (err) {
+                console.error(err);
+                errorText.textContent = '파일 처리 중 오류가 발생했습니다. 파일 형식을 확인해주세요.';
+                errorMessage.classList.remove('hidden');
+                btnProcess.classList.remove('hidden');
+                btnLoading.classList.add('hidden');
+            }
+        });
+
+        // Event Listener: Download
+        btnDownload.addEventListener('click', () => {
+            if (!processedData) return;
+            const ws = XLSX.utils.json_to_sheet(processedData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Renewal_Purchase_Items");
+            const date = new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(wb, `purchase_items_renewed_${date}.xlsx`);
+        });
+
+        // Event Listener: Reset
+        btnReset.addEventListener('click', () => {
+            processedData = null;
+            removeFile('purchase');
+            removeFile('members');
+            step2.classList.add('hidden');
+            step1.classList.remove('hidden');
+            introSection.classList.remove('hidden');
+            btnProcess.classList.remove('hidden');
+            btnLoading.classList.add('hidden');
+        });
+
+        // Initial Icon Render (Safe Check)
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        
+        // Re-render icons after DOM updates (safeguard)
+        const observer = new MutationObserver(() => {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+    </script>
+</body>
+</html>
